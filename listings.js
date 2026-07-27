@@ -5,8 +5,9 @@
  *
  * Part 1: "Listing Address"      -> primary single box, US-only Google Places autocomplete.
  * Part 2: "Additional Addresses" -> a "+ Add address" repeater (US-only autocomplete on each row).
- *          Extra rows are serialized (newline-separated) into the single native
- *          "Additional Addresses" field so GoHighLevel saves them reliably.
+ *          Extra rows are joined with a single-line-safe delimiter into the native
+ *          "Additional Addresses" field so GoHighLevel saves them reliably even if that
+ *          field is a single-line text field.
  *
  * Requirements (set in the SAME Custom JS box, BEFORE loading this file):
  *   window.MR_GOOGLE_KEY = 'YOUR_GOOGLE_MAPS_JS_API_KEY';
@@ -21,7 +22,7 @@
     primaryLabel: 'Listing Address',
     additionalLabel: 'Additional Addresses',
     country: 'us',
-    rowSeparator: '\n',
+    rowSeparator: ' ||| ',   // survives single-line fields (newlines get stripped by GHL)
     googleKey: window.MR_GOOGLE_KEY || ''
   };
 
@@ -124,12 +125,13 @@
     });
   }
 
-  /* ---------- Part 2: the "+ Add address" repeater ---------- */
+  /* ---------- Part 2: the "+ Add address" repeater ----------
+   * Keyed off the field's HOST container (stable) rather than the input node,
+   * so GHL re-renders don't spawn duplicate/merged repeaters.
+   */
   function buildRepeater(storageInput) {
-    if (storageInput.__mrRepeater) { return; }
-    storageInput.__mrRepeater = true;
-
     var host = storageInput.closest('[class*="form-group"], .field, .n-form-item') || storageInput.parentElement;
+    if (!host || host.querySelector('.mr-rep')) { return; } // already built for this field
 
     var wrap = document.createElement('div');
     wrap.className = 'mr-rep';
@@ -167,19 +169,17 @@
     addBtn.addEventListener('click', function () { addRow('').focus(); });
     wrap.appendChild(addBtn);
 
-    var existing = (storageInput.value || '')
-      .split(CONFIG.rowSeparator).map(function (s) { return s.trim(); }).filter(Boolean);
+    // Seed rows from stored value. Support both the new delimiter and any legacy newline data.
+    var raw = storageInput.value || '';
+    var parts = raw.indexOf(CONFIG.rowSeparator) !== -1 ? raw.split(CONFIG.rowSeparator) : raw.split('\n');
+    var existing = parts.map(function (s) { return s.trim(); }).filter(Boolean);
     if (existing.length) { existing.forEach(addRow); } else { addRow(''); }
-
-    storageInput.__mrWrap = wrap;
   }
 
-  /* ---------- Keep the native storage field hidden even after GHL re-renders ---------- */
   function ensureHidden(el) {
     if (el && !el.classList.contains('mr-addr-hidden')) { el.classList.add('mr-addr-hidden'); }
   }
 
-  /* ---------- Remove stray Google dropdowns when no address box is visible ---------- */
   function cleanupPac() {
     var visible = false;
     document.querySelectorAll('input[data-mr-addr]').forEach(function (i) {
@@ -199,12 +199,8 @@
 
     var additional = findFieldByLabel(CONFIG.additionalLabel);
     if (additional) {
+      ensureHidden(additional);
       buildRepeater(additional);
-      ensureHidden(additional); // re-hide every pass so it can't drift back into view
-      // keep the repeater directly after the hidden native field if GHL moved things
-      if (additional.__mrWrap && additional.parentNode && additional.__mrWrap.parentNode !== additional.parentNode) {
-        // no-op guard; repeater stays under original host
-      }
     }
 
     cleanupPac();
