@@ -6,8 +6,7 @@
  * Part 1: "Listing Address"      -> primary single box, US-only Google Places autocomplete.
  * Part 2: "Additional Addresses" -> a "+ Add address" repeater (US-only autocomplete on each row).
  *          Extra rows are joined with a single-line-safe delimiter into the native
- *          "Additional Addresses" field so GoHighLevel saves them reliably even if that
- *          field is a single-line text field.
+ *          "Additional Addresses" field so GoHighLevel saves them reliably.
  *
  * Requirements (set in the SAME Custom JS box, BEFORE loading this file):
  *   window.MR_GOOGLE_KEY = 'YOUR_GOOGLE_MAPS_JS_API_KEY';
@@ -22,7 +21,7 @@
     primaryLabel: 'Listing Address',
     additionalLabel: 'Additional Addresses',
     country: 'us',
-    rowSeparator: ' ||| ',   // survives single-line fields (newlines get stripped by GHL)
+    rowSeparator: ' ||| ',
     googleKey: window.MR_GOOGLE_KEY || ''
   };
 
@@ -55,12 +54,16 @@
     document.head.appendChild(s);
   }
 
-  /* ---------- Styles ---------- */
+  /* ---------- Styles ----------
+   * The native storage field is hidden by a GLOBAL rule keyed on data-mr-hide.
+   * React controls className/inline-style and would strip those on re-render, but it
+   * leaves this data-attribute alone, and an !important stylesheet rule beats its styles.
+   */
   (function injectStyle() {
     var st = document.createElement('style');
     st.textContent =
       '.pac-container{z-index:2147483647 !important;}' +
-      '.mr-addr-hidden{position:absolute !important;left:-99999px !important;top:auto !important;width:1px !important;height:1px !important;opacity:0 !important;pointer-events:none !important;}' +
+      '[data-mr-hide="1"]{position:absolute !important;left:-99999px !important;top:auto !important;width:1px !important;height:1px !important;min-height:0 !important;opacity:0 !important;pointer-events:none !important;}' +
       '.mr-rep{margin-top:2px;}' +
       '.mr-rep-row{display:flex;gap:6px;margin-bottom:6px;align-items:center;}' +
       '.mr-rep-input{flex:1;padding:7px 9px;border:1px solid #d0d5dd;border-radius:6px;font-size:14px;box-sizing:border-box;}' +
@@ -125,13 +128,10 @@
     });
   }
 
-  /* ---------- Part 2: the "+ Add address" repeater ----------
-   * Keyed off the field's HOST container (stable) rather than the input node,
-   * so GHL re-renders don't spawn duplicate/merged repeaters.
-   */
+  /* ---------- Part 2: the "+ Add address" repeater (keyed off host) ---------- */
   function buildRepeater(storageInput) {
     var host = storageInput.closest('[class*="form-group"], .field, .n-form-item') || storageInput.parentElement;
-    if (!host || host.querySelector('.mr-rep')) { return; } // already built for this field
+    if (!host || host.querySelector('.mr-rep')) { return; }
 
     var wrap = document.createElement('div');
     wrap.className = 'mr-rep';
@@ -169,15 +169,15 @@
     addBtn.addEventListener('click', function () { addRow('').focus(); });
     wrap.appendChild(addBtn);
 
-    // Seed rows from stored value. Support both the new delimiter and any legacy newline data.
     var raw = storageInput.value || '';
     var parts = raw.indexOf(CONFIG.rowSeparator) !== -1 ? raw.split(CONFIG.rowSeparator) : raw.split('\n');
     var existing = parts.map(function (s) { return s.trim(); }).filter(Boolean);
     if (existing.length) { existing.forEach(addRow); } else { addRow(''); }
   }
 
+  /* ---------- Keep native storage field hidden (React-proof) ---------- */
   function ensureHidden(el) {
-    if (el && !el.classList.contains('mr-addr-hidden')) { el.classList.add('mr-addr-hidden'); }
+    if (el && el.getAttribute('data-mr-hide') !== '1') { el.setAttribute('data-mr-hide', '1'); }
   }
 
   function cleanupPac() {
