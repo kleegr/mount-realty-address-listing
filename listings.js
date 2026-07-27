@@ -65,6 +65,7 @@
     var st = document.createElement('style');
     st.textContent =
       '.pac-container{z-index:2147483647 !important;}' +
+      '.pac-container.mr-pac-hidden{display:none !important;}' +
       '[data-mr-hide="1"]{position:absolute !important;left:-99999px !important;top:auto !important;width:1px !important;height:1px !important;min-height:0 !important;opacity:0 !important;pointer-events:none !important;overflow:hidden !important;}' +
       '.mr-rep{margin-top:4px;}' +
       '.mr-rep-row{display:flex;gap:6px;margin-bottom:6px;align-items:center;}' +
@@ -86,6 +87,21 @@
     el.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
+  /* ---------- Close the Places dropdown and keep it closed through the late re-open ----------
+   * Selecting a place makes us write the value back, which fires an 'input' event; Places then
+   * re-fetches predictions and re-opens the dropdown a few hundred ms later. We blur and then
+   * force every pac-container hidden repeatedly for a short window to defeat that re-open.
+   * The class is removed on the next real keystroke (see attach) so future typing still works.
+   */
+  function suppressDropdown(input) {
+    if (input) { input.blur(); }
+    var tries = 0;
+    var iv = setInterval(function () {
+      document.querySelectorAll('.pac-container').forEach(function (pc) { pc.classList.add('mr-pac-hidden'); });
+      if (++tries >= 12) { clearInterval(iv); }
+    }, 50);
+  }
+
   /* ---------- Find a field's input by its visible label ---------- */
   function findFieldByLabel(labelText) {
     var want = labelText.trim().toLowerCase();
@@ -104,13 +120,11 @@
     return null;
   }
 
-  /* ---------- The field container (mount host) for a native input ---------- */
   function fieldHost(input) {
     return input.closest('.hr-form-item') ||
            input.closest('[class*="form-group"], .field, .n-form-item') ||
            input.parentElement;
   }
-  /* ---------- The native control box to hide (keeps our repeater visible) ---------- */
   function nativeControl(input) {
     return input.closest('.hr-form-item-blank') || input.closest('.hr-input') || input;
   }
@@ -121,6 +135,10 @@
     input.__mrAuto = true;
     input.setAttribute('autocomplete', 'off');
     input.setAttribute('data-mr-addr', '1');
+    // A real keystroke clears the suppression so predictions can show again.
+    input.addEventListener('input', function () {
+      document.querySelectorAll('.pac-container.mr-pac-hidden').forEach(function (pc) { pc.classList.remove('mr-pac-hidden'); });
+    });
     loadGoogle();
     onGoogleReady(function () {
       var ac = new google.maps.places.Autocomplete(input, {
@@ -133,13 +151,10 @@
         var addr = (p && p.formatted_address) ? p.formatted_address : input.value;
         setNativeValue(input, addr);
         if (onPlace) { onPlace(addr); }
-        setTimeout(function () {
-          input.blur();
-          document.querySelectorAll('.pac-container').forEach(function (pc) { pc.style.display = 'none'; });
-        }, 10);
+        suppressDropdown(input);
       });
       input.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter' && document.querySelector('.pac-container:not([style*="display: none"])')) {
+        if (e.key === 'Enter' && document.querySelector('.pac-container:not(.mr-pac-hidden)')) {
           e.preventDefault();
         }
       });
@@ -193,7 +208,6 @@
     if (existing.length) { existing.forEach(addRow); } else { addRow(''); }
   }
 
-  /* ---------- Hide the WHOLE native control (React-proof) ---------- */
   function ensureHidden(input) {
     var ctrl = nativeControl(input);
     if (ctrl && ctrl.getAttribute('data-mr-hide') !== '1') { ctrl.setAttribute('data-mr-hide', '1'); }
