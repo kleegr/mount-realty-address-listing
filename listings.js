@@ -54,11 +54,7 @@
     document.head.appendChild(s);
   }
 
-  /* ---------- Styles ----------
-   * The native storage field is hidden by a GLOBAL rule keyed on data-mr-hide.
-   * React controls className/inline-style and would strip those on re-render, but it
-   * leaves this data-attribute alone, and an !important stylesheet rule beats its styles.
-   */
+  /* ---------- Styles ---------- */
   (function injectStyle() {
     var st = document.createElement('style');
     st.textContent =
@@ -119,6 +115,12 @@
         var addr = (p && p.formatted_address) ? p.formatted_address : input.value;
         setNativeValue(input, addr);
         if (onPlace) { onPlace(addr); }
+        // Writing the value back fires an 'input' event that makes Places think the user
+        // typed again and re-opens the dropdown. Blur to close it and don't let it linger.
+        setTimeout(function () {
+          input.blur();
+          document.querySelectorAll('.pac-container').forEach(function (pc) { pc.style.display = 'none'; });
+        }, 10);
       });
       input.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' && document.querySelector('.pac-container:not([style*="display: none"])')) {
