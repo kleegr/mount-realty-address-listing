@@ -1,5 +1,5 @@
 /*!
- * Mount Realty — GHL Opportunity Address Autocomplete
+ * Mount Realty — GHL Opportunity Address Autocomplete   (v9)
  * -------------------------------------------------------
  * Runs inside GoHighLevel via AGENCY-level Custom JS, scoped to ONE sub-account.
  *
@@ -7,12 +7,6 @@
  * Part 2: "Additional Addresses" -> a "+ Add address" repeater (US-only autocomplete on each row).
  *          Extra rows are joined with a single-line-safe delimiter into the native
  *          "Additional Addresses" field so GoHighLevel saves them reliably.
- *
- * GHL field DOM (observed):
- *   .hr-form-item                      (field container = our mount host)
- *     label.hr-form-item-label > span  (the visible field label — kept)
- *     .hr-form-item-blank              (the native input control — we hide this whole thing)
- *       ... .hr-input ... input.hr-input__input-el   (the native input we read/write)
  *
  * Requirements (set in the SAME Custom JS box, BEFORE loading this file):
  *   window.MR_GOOGLE_KEY = 'YOUR_GOOGLE_MAPS_JS_API_KEY';
@@ -22,12 +16,15 @@
 (function () {
   'use strict';
 
+  var VERSION = 'v9';
+
   var CONFIG = {
     allowedLocation: window.MR_LOCATION_ID || 'UpjC8IK37wMzeb1pc9D0',
     primaryLabel: 'Listing Address',
     additionalLabel: 'Additional Addresses',
     country: 'us',
     rowSeparator: ' ||| ',
+    suppressMs: 800,
     googleKey: window.MR_GOOGLE_KEY || ''
   };
 
@@ -65,7 +62,6 @@
     var st = document.createElement('style');
     st.textContent =
       '.pac-container{z-index:2147483647 !important;}' +
-      '.pac-container.mr-pac-hidden{display:none !important;}' +
       '[data-mr-hide="1"]{position:absolute !important;left:-99999px !important;top:auto !important;width:1px !important;height:1px !important;min-height:0 !important;opacity:0 !important;pointer-events:none !important;overflow:hidden !important;}' +
       '.mr-rep{margin-top:4px;}' +
       '.mr-rep-row{display:flex;gap:6px;margin-bottom:6px;align-items:center;}' +
@@ -78,6 +74,25 @@
     document.head.appendChild(st);
   })();
 
+  /* ---------- Time-based dropdown suppression ----------
+   * Selecting a place makes us write the value back, which fires an 'input' event; Places then
+   * re-fetches predictions and re-opens the dropdown a few hundred ms later. We lock the dropdown
+   * shut for a short window after any selection; after it expires, typing shows predictions again.
+   */
+  var suppressUntil = 0;
+  (function startSuppressor() {
+    setInterval(function () {
+      if (Date.now() < suppressUntil) {
+        document.querySelectorAll('.pac-container').forEach(function (pc) { pc.style.display = 'none'; });
+      }
+    }, 40);
+  })();
+  function suppressDropdown(input) {
+    suppressUntil = Date.now() + CONFIG.suppressMs;
+    if (input) { try { input.blur(); } catch (e) {} }
+    document.querySelectorAll('.pac-container').forEach(function (pc) { pc.style.display = 'none'; });
+  }
+
   /* ---------- React-safe value setter ---------- */
   function setNativeValue(el, value) {
     var proto = (el instanceof HTMLTextAreaElement) ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
@@ -85,21 +100,6 @@
     if (desc && desc.set) { desc.set.call(el, value); } else { el.value = value; }
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
-  }
-
-  /* ---------- Close the Places dropdown and keep it closed through the late re-open ----------
-   * Selecting a place makes us write the value back, which fires an 'input' event; Places then
-   * re-fetches predictions and re-opens the dropdown a few hundred ms later. We blur and then
-   * force every pac-container hidden repeatedly for a short window to defeat that re-open.
-   * The class is removed on the next real keystroke (see attach) so future typing still works.
-   */
-  function suppressDropdown(input) {
-    if (input) { input.blur(); }
-    var tries = 0;
-    var iv = setInterval(function () {
-      document.querySelectorAll('.pac-container').forEach(function (pc) { pc.classList.add('mr-pac-hidden'); });
-      if (++tries >= 12) { clearInterval(iv); }
-    }, 50);
   }
 
   /* ---------- Find a field's input by its visible label ---------- */
@@ -135,10 +135,6 @@
     input.__mrAuto = true;
     input.setAttribute('autocomplete', 'off');
     input.setAttribute('data-mr-addr', '1');
-    // A real keystroke clears the suppression so predictions can show again.
-    input.addEventListener('input', function () {
-      document.querySelectorAll('.pac-container.mr-pac-hidden').forEach(function (pc) { pc.classList.remove('mr-pac-hidden'); });
-    });
     loadGoogle();
     onGoogleReady(function () {
       var ac = new google.maps.places.Autocomplete(input, {
@@ -154,7 +150,8 @@
         suppressDropdown(input);
       });
       input.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter' && document.querySelector('.pac-container:not(.mr-pac-hidden)')) {
+        if (e.key === 'Enter' && Date.now() >= suppressUntil &&
+            document.querySelector('.pac-container:not([style*="display: none"])')) {
           e.preventDefault();
         }
       });
@@ -247,5 +244,5 @@
   obs.observe(document.body, { childList: true, subtree: true });
   scan();
 
-  console.log('[MR Address] listings.js loaded (scoped to ' + CONFIG.allowedLocation + ').');
+  console.log('[MR Address] listings.js ' + VERSION + ' loaded (scoped to ' + CONFIG.allowedLocation + ').');
 })();
