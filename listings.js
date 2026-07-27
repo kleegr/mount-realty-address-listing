@@ -1,7 +1,7 @@
 /*!
  * Mount Realty — GHL Opportunity Address Autocomplete
  * -------------------------------------------------------
- * Runs inside GoHighLevel via sub-account Custom JS.
+ * Runs inside GoHighLevel via AGENCY-level Custom JS, but scoped to ONE sub-account.
  *
  * Part 1: "Listing Address"      -> primary single box, US-only Google Places autocomplete.
  * Part 2: "Additional Addresses" -> a "+ Add address" repeater (US-only autocomplete on each row).
@@ -10,15 +10,17 @@
  *
  * Requirements (set in the SAME Custom JS box, BEFORE loading this file):
  *   window.MR_GOOGLE_KEY = 'YOUR_GOOGLE_MAPS_JS_API_KEY';
+ * Optional override of the target sub-account:
+ *   window.MR_LOCATION_ID = 'someOtherLocationId';
  *
- * The two field LABELS below must match the custom fields you create in the
- * "General Listings" folder exactly. If GoHighLevel changes its UI and the script
- * stops finding fields, adjust the selectors in findFieldByLabel().
+ * SCOPING: this only activates when the current GHL URL contains CONFIG.allowedLocation,
+ * so it stays dormant on every other sub-account even though agency code loads everywhere.
  */
 (function () {
   'use strict';
 
   var CONFIG = {
+    allowedLocation: window.MR_LOCATION_ID || 'UpjC8IK37wMzeb1pc9D0', // ONLY run on this sub-account
     primaryLabel: 'Listing Address',        // Part 1 field label
     additionalLabel: 'Additional Addresses', // Part 2 storage field label
     country: 'us',                           // US-only suggestions
@@ -26,11 +28,17 @@
     googleKey: window.MR_GOOGLE_KEY || ''
   };
 
+  // Only act when we're inside the allowed sub-account (location id appears in the URL).
+  function onAllowedLocation() {
+    if (!CONFIG.allowedLocation) { return true; }
+    return window.location.href.indexOf(CONFIG.allowedLocation) !== -1;
+  }
+
   if (!CONFIG.googleKey) {
     console.warn('[MR Address] No Google key found. Set window.MR_GOOGLE_KEY in the GHL Custom JS box BEFORE loading listings.js.');
   }
 
-  /* ---------- Load Google Maps + Places ---------- */
+  /* ---------- Load Google Maps + Places (only if we may need it) ---------- */
   var googleReady = false;
   var readyQueue = [];
   function onGoogleReady(cb) { if (googleReady) { cb(); } else { readyQueue.push(cb); } }
@@ -41,7 +49,7 @@
     readyQueue = [];
   };
 
-  (function loadGoogle() {
+  function loadGoogle() {
     if (window.google && window.google.maps && window.google.maps.places) { window.__mrGmapsInit(); return; }
     if (document.getElementById('mr-gmaps-js')) { return; }
     if (!CONFIG.googleKey) { return; }
@@ -52,7 +60,7 @@
     s.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(CONFIG.googleKey) +
             '&libraries=places&callback=__mrGmapsInit';
     document.head.appendChild(s);
-  })();
+  }
 
   /* ---------- Keep the Places dropdown above the GHL modal ---------- */
   (function injectStyle() {
@@ -101,6 +109,7 @@
     if (!input || input.__mrAuto) { return; }
     input.__mrAuto = true;
     input.setAttribute('autocomplete', 'off');
+    loadGoogle();
     onGoogleReady(function () {
       var ac = new google.maps.places.Autocomplete(input, {
         types: ['address'],
@@ -113,7 +122,6 @@
         setNativeValue(input, addr);
         if (onPlace) { onPlace(addr); }
       });
-      // Stop Enter from submitting/closing the modal while picking a suggestion.
       input.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' && document.querySelector('.pac-container:not([style*="display: none"])')) {
           e.preventDefault();
@@ -128,7 +136,7 @@
     storageInput.__mrRepeater = true;
 
     var host = storageInput.closest('[class*="form-group"], .field, .n-form-item') || storageInput.parentElement;
-    storageInput.style.display = 'none'; // keep it for storage, hide from view
+    storageInput.style.display = 'none';
 
     var wrap = document.createElement('div');
     wrap.className = 'mr-rep';
@@ -146,9 +154,7 @@
       });
       return vals;
     }
-    function save() {
-      setNativeValue(storageInput, collect().join(CONFIG.rowSeparator));
-    }
+    function save() { setNativeValue(storageInput, collect().join(CONFIG.rowSeparator)); }
     function addRow(value) {
       var row = document.createElement('div');
       row.className = 'mr-rep-row';
@@ -177,7 +183,6 @@
     addBtn.addEventListener('click', function () { addRow('').focus(); });
     wrap.appendChild(addBtn);
 
-    // Seed rows from whatever is already stored on this opportunity.
     var existing = (storageInput.value || '')
       .split(CONFIG.rowSeparator)
       .map(function (s) { return s.trim(); })
@@ -187,6 +192,8 @@
 
   /* ---------- Scan whenever the opportunity panel renders ---------- */
   function scan() {
+    if (!onAllowedLocation()) { return; } // dormant on all other sub-accounts
+
     var primary = findFieldByLabel(CONFIG.primaryLabel);
     if (primary) { attachAutocomplete(primary); }
 
@@ -202,5 +209,5 @@
   obs.observe(document.body, { childList: true, subtree: true });
   scan();
 
-  console.log('[MR Address] listings.js loaded.');
+  console.log('[MR Address] listings.js loaded (scoped to ' + CONFIG.allowedLocation + ').');
 })();
