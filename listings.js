@@ -8,6 +8,12 @@
  *          Extra rows are joined with a single-line-safe delimiter into the native
  *          "Additional Addresses" field so GoHighLevel saves them reliably.
  *
+ * GHL field DOM (observed):
+ *   .hr-form-item                      (field container = our mount host)
+ *     label.hr-form-item-label > span  (the visible field label — kept)
+ *     .hr-form-item-blank              (the native input control — we hide this whole thing)
+ *       ... .hr-input ... input.hr-input__input-el   (the native input we read/write)
+ *
  * Requirements (set in the SAME Custom JS box, BEFORE loading this file):
  *   window.MR_GOOGLE_KEY = 'YOUR_GOOGLE_MAPS_JS_API_KEY';
  * Optional override of the target sub-account:
@@ -59,13 +65,14 @@
     var st = document.createElement('style');
     st.textContent =
       '.pac-container{z-index:2147483647 !important;}' +
-      '[data-mr-hide="1"]{position:absolute !important;left:-99999px !important;top:auto !important;width:1px !important;height:1px !important;min-height:0 !important;opacity:0 !important;pointer-events:none !important;}' +
-      '.mr-rep{margin-top:2px;}' +
+      '[data-mr-hide="1"]{position:absolute !important;left:-99999px !important;top:auto !important;width:1px !important;height:1px !important;min-height:0 !important;opacity:0 !important;pointer-events:none !important;overflow:hidden !important;}' +
+      '.mr-rep{margin-top:4px;}' +
       '.mr-rep-row{display:flex;gap:6px;margin-bottom:6px;align-items:center;}' +
-      '.mr-rep-input{flex:1;padding:7px 9px;border:1px solid #d0d5dd;border-radius:6px;font-size:14px;box-sizing:border-box;}' +
-      '.mr-rep-rm{border:none;background:#f2f4f7;border-radius:6px;width:30px;height:30px;min-width:30px;cursor:pointer;font-size:18px;line-height:1;color:#667085;}' +
+      '.mr-rep-input{flex:1;padding:8px 10px;border:1px solid #d0d5dd;border-radius:6px;font-size:14px;box-sizing:border-box;}' +
+      '.mr-rep-input:focus{outline:none;border-color:#2f80ed;box-shadow:0 0 0 2px rgba(47,128,237,.15);}' +
+      '.mr-rep-rm{border:none;background:#f2f4f7;border-radius:6px;width:32px;height:32px;min-width:32px;cursor:pointer;font-size:18px;line-height:1;color:#667085;}' +
       '.mr-rep-rm:hover{background:#fee4e2;color:#d92d20;}' +
-      '.mr-rep-add{border:1px dashed #98a2b3;background:#fff;border-radius:6px;padding:7px 12px;cursor:pointer;font-size:13px;color:#344054;}' +
+      '.mr-rep-add{border:1px dashed #98a2b3;background:#fff;border-radius:6px;padding:8px 12px;cursor:pointer;font-size:13px;color:#344054;}' +
       '.mr-rep-add:hover{background:#f9fafb;}';
     document.head.appendChild(st);
   })();
@@ -87,7 +94,7 @@
       var txt = (labels[i].textContent || '').trim().toLowerCase().replace(/\s*\*$/, '');
       if (txt === want) {
         var node = labels[i];
-        for (var up = 0; up < 5 && node; up++) {
+        for (var up = 0; up < 6 && node; up++) {
           var input = node.querySelector ? node.querySelector('input:not([type=hidden]):not(.mr-rep-input), textarea') : null;
           if (input) { return input; }
           node = node.parentElement;
@@ -95,6 +102,17 @@
       }
     }
     return null;
+  }
+
+  /* ---------- The field container (mount host) for a native input ---------- */
+  function fieldHost(input) {
+    return input.closest('.hr-form-item') ||
+           input.closest('[class*="form-group"], .field, .n-form-item') ||
+           input.parentElement;
+  }
+  /* ---------- The native control box to hide (keeps our repeater visible) ---------- */
+  function nativeControl(input) {
+    return input.closest('.hr-form-item-blank') || input.closest('.hr-input') || input;
   }
 
   /* ---------- Attach Google autocomplete to a native input ---------- */
@@ -115,8 +133,6 @@
         var addr = (p && p.formatted_address) ? p.formatted_address : input.value;
         setNativeValue(input, addr);
         if (onPlace) { onPlace(addr); }
-        // Writing the value back fires an 'input' event that makes Places think the user
-        // typed again and re-opens the dropdown. Blur to close it and don't let it linger.
         setTimeout(function () {
           input.blur();
           document.querySelectorAll('.pac-container').forEach(function (pc) { pc.style.display = 'none'; });
@@ -130,9 +146,9 @@
     });
   }
 
-  /* ---------- Part 2: the "+ Add address" repeater (keyed off host) ---------- */
+  /* ---------- Part 2: the "+ Add address" repeater ---------- */
   function buildRepeater(storageInput) {
-    var host = storageInput.closest('[class*="form-group"], .field, .n-form-item') || storageInput.parentElement;
+    var host = fieldHost(storageInput);
     if (!host || host.querySelector('.mr-rep')) { return; }
 
     var wrap = document.createElement('div');
@@ -177,9 +193,10 @@
     if (existing.length) { existing.forEach(addRow); } else { addRow(''); }
   }
 
-  /* ---------- Keep native storage field hidden (React-proof) ---------- */
-  function ensureHidden(el) {
-    if (el && el.getAttribute('data-mr-hide') !== '1') { el.setAttribute('data-mr-hide', '1'); }
+  /* ---------- Hide the WHOLE native control (React-proof) ---------- */
+  function ensureHidden(input) {
+    var ctrl = nativeControl(input);
+    if (ctrl && ctrl.getAttribute('data-mr-hide') !== '1') { ctrl.setAttribute('data-mr-hide', '1'); }
   }
 
   function cleanupPac() {
