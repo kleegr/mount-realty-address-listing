@@ -1,5 +1,5 @@
 /*!
- * Mount Realty — GHL Opportunity Address Autocomplete   (v9)
+ * Mount Realty — GHL Opportunity Address Autocomplete   (v10)
  * -------------------------------------------------------
  * Runs inside GoHighLevel via AGENCY-level Custom JS, scoped to ONE sub-account.
  *
@@ -7,6 +7,11 @@
  * Part 2: "Additional Addresses" -> a "+ Add address" repeater (US-only autocomplete on each row).
  *          Extra rows are joined with a single-line-safe delimiter into the native
  *          "Additional Addresses" field so GoHighLevel saves them reliably.
+ *
+ * Dropdown rule: a Google .pac-container may only be visible while an address input is
+ * actually focused. On blur / selection / modal-close / board view, all dropdowns are
+ * forced hidden. This defeats the "dropdown lingers after selecting" and the
+ * "dropdown stranded on the pipeline board" problems in one shot.
  *
  * Requirements (set in the SAME Custom JS box, BEFORE loading this file):
  *   window.MR_GOOGLE_KEY = 'YOUR_GOOGLE_MAPS_JS_API_KEY';
@@ -16,7 +21,8 @@
 (function () {
   'use strict';
 
-  var VERSION = 'v9';
+  var VERSION = 'v10';
+  window.MR_ADDR_VERSION = VERSION; // type MR_ADDR_VERSION in the console to check what's loaded
 
   var CONFIG = {
     allowedLocation: window.MR_LOCATION_ID || 'UpjC8IK37wMzeb1pc9D0',
@@ -24,7 +30,6 @@
     additionalLabel: 'Additional Addresses',
     country: 'us',
     rowSeparator: ' ||| ',
-    suppressMs: 800,
     googleKey: window.MR_GOOGLE_KEY || ''
   };
 
@@ -74,24 +79,18 @@
     document.head.appendChild(st);
   })();
 
-  /* ---------- Time-based dropdown suppression ----------
-   * Selecting a place makes us write the value back, which fires an 'input' event; Places then
-   * re-fetches predictions and re-opens the dropdown a few hundred ms later. We lock the dropdown
-   * shut for a short window after any selection; after it expires, typing shows predictions again.
-   */
-  var suppressUntil = 0;
-  (function startSuppressor() {
-    setInterval(function () {
-      if (Date.now() < suppressUntil) {
-        document.querySelectorAll('.pac-container').forEach(function (pc) { pc.style.display = 'none'; });
-      }
-    }, 40);
-  })();
-  function suppressDropdown(input) {
-    suppressUntil = Date.now() + CONFIG.suppressMs;
-    if (input) { try { input.blur(); } catch (e) {} }
-    document.querySelectorAll('.pac-container').forEach(function (pc) { pc.style.display = 'none'; });
+  /* ---------- Dropdown gate: only show while an address box is focused ---------- */
+  function addrFocused() {
+    var a = document.activeElement;
+    return !!(a && a.getAttribute && a.getAttribute('data-mr-addr') === '1');
   }
+  setInterval(function () {
+    if (!addrFocused()) {
+      document.querySelectorAll('.pac-container').forEach(function (pc) {
+        if (pc.style.display !== 'none') { pc.style.display = 'none'; }
+      });
+    }
+  }, 50);
 
   /* ---------- React-safe value setter ---------- */
   function setNativeValue(el, value) {
@@ -147,11 +146,11 @@
         var addr = (p && p.formatted_address) ? p.formatted_address : input.value;
         setNativeValue(input, addr);
         if (onPlace) { onPlace(addr); }
-        suppressDropdown(input);
+        // Drop focus so the dropdown gate immediately hides any (re-)opened dropdown.
+        try { input.blur(); } catch (e) {}
       });
       input.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter' && Date.now() >= suppressUntil &&
-            document.querySelector('.pac-container:not([style*="display: none"])')) {
+        if (e.key === 'Enter' && document.querySelector('.pac-container:not([style*="display: none"])')) {
           e.preventDefault();
         }
       });
@@ -210,12 +209,10 @@
     if (ctrl && ctrl.getAttribute('data-mr-hide') !== '1') { ctrl.setAttribute('data-mr-hide', '1'); }
   }
 
+  /* ---------- Remove accumulated dropdowns when no address input exists in the DOM ---------- */
   function cleanupPac() {
-    var visible = false;
-    document.querySelectorAll('input[data-mr-addr]').forEach(function (i) {
-      if (i.offsetParent !== null) { visible = true; }
-    });
-    if (!visible) {
+    var present = document.querySelector('input[data-mr-addr]');
+    if (!present) {
       document.querySelectorAll('.pac-container').forEach(function (p) { p.remove(); });
     }
   }
